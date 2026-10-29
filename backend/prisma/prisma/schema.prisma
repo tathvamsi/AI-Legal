@@ -1,0 +1,188 @@
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+model Firm {
+  id        String   @id @default(uuid())
+  name      String
+  slug      String   @unique
+  ownerId   String
+  createdAt DateTime @default(now())
+
+  owner     User     @relation("FirmOwner", fields: [ownerId], references: [id])
+  users     User[]
+  matters   Matter[]
+  acts      Act[]
+}
+
+model User {
+  id        String   @id @default(uuid())
+  email     String   @unique
+  password  String
+  name      String?
+  role      String   // "ADMIN" | "LAWYER"
+  firmId    String?
+  createdAt DateTime @default(now())
+
+  firm      Firm?     @relation("FirmOwner", fields: [firmId], references: [id])
+  matters   Matter[]
+  documents Document[]
+  conversations Conversation[]
+  messages  Message[]
+}
+
+model Matter {
+  id          String   @id @default(uuid())
+  firmId      String
+  ownerId     String   // lawyer who created / owns this matter (private workspace)
+  name        String
+  client      String?
+  court       String?
+  caseNumber  String?
+  status      String   @default("OPEN") // OPEN | CLOSED | ARCHIVED
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  firm        Firm     @relation(fields: [firmId], references: [id])
+  owner       User     @relation(fields: [ownerId], references: [id])
+  documents   Document[]
+  conversations Conversation[]
+}
+
+model Document {
+  id          String   @id @default(uuid())
+  matterId    String
+  ownerId     String
+  filename    String
+  originalName String?
+  mimeType    String?
+  size        Int?
+  status      String   @default("UPLOADED") // UPLOADED | PROCESSING | READY | FAILED
+  pageCount   Int?
+  error       String?
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  matter      Matter   @relation(fields: [matterId], references: [id])
+  owner       User     @relation(fields: [ownerId], references: [id])
+  chunks      DocumentChunk[]
+}
+
+model DocumentChunk {
+  id        String   @id @default(uuid())
+  documentId String
+  matterId   String
+  ownerId    String
+  scope      String   // PRIVATE | SHARED
+  content    String
+  page       Int
+  chunkId    Int      // chunk index within document
+  qdrantId   String   // vector id in Qdrant
+  createdAt  DateTime @default(now())
+
+  document  Document @relation(fields: [documentId], references: [id])
+}
+
+model Conversation {
+  id          String   @id @default(uuid())
+  matterId    String?
+  ownerId     String
+  title       String
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  matter      Matter?    @relation(fields: [matterId], references: [id])
+  owner       User     @relation(fields: [ownerId], references: [id])
+  messages    Message[]
+}
+
+model Message {
+  id        String   @id @default(uuid())
+  conversationId String
+  ownerId   String
+  role      String   // USER | ASSISTANT | SYSTEM
+  content   String
+  createdAt DateTime @default(now())
+
+  conversation Conversation @relation(fields: [conversationId], references: [id])
+  citations Citation[]
+}
+
+model Citation {
+  id        String   @id @default(uuid())
+  messageId String
+  sourceType String  // CASE_FILE | LEGISLATION
+  sourceId  String   // document chunk id or act section id
+  sourceName String  // filename or statute name
+  page      Int?
+  section   String?
+  excerpt   String
+  scope     String   // PRIVATE | SHARED
+  createdAt DateTime @default(now())
+
+  message   Message @relation(fields: [messageId], references: [id])
+}
+
+// --- Legislation (structured) ---
+
+model Act {
+  id          String   @id @default(uuid())
+  firmId      String?  // null = platform-level published act
+  name        String   // e.g. "Indian Contract Act, 1872"
+  year        Int?
+  version     String?
+  sourceUrl   String?
+  provenance  String?
+  isPublished Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  firm        Firm?     @relation(fields: [firmId], references: [id])
+  chapters    Chapter[]
+  sections    Section[]
+}
+
+model Chapter {
+  id        String   @id @default(uuid())
+  actId     String
+  title     String
+  ordinal   Int?
+  sections  Section[]
+
+  act       Act @relation(fields: [actId], references: [id])
+}
+
+model Section {
+  id          String   @id @default(uuid())
+  actId       String
+  chapterId   String?
+  number      String   // e.g. "73", "10-A"
+  title       String?
+  content     String   // full text of the section
+  version     String?
+  sourceUrl   String?
+  provenance  String?
+  isPublished Boolean  @default(false)
+  createdAt   DateTime @default(now())
+  updatedAt   DateTime @updatedAt
+
+  act         Act      @relation(fields: [actId], references: [id])
+  chapter     Chapter? @relation(fields: [chapterId], references: [id])
+  subsections Subsection[]
+  citations   Citation[]
+}
+
+model Subsection {
+  id        String   @id @default(uuid())
+  sectionId String
+  label     String   // e.g. "(1)", "(2)", "Explanation"
+  content   String
+  ordinal   Int?
+
+  section   Section @relation(fields: [sectionId], references: [id])
+}
